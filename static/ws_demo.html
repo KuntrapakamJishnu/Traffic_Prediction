@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WS Demo - Traffic Predictions</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#0b1220; color:#e6eef6; }
+    .container { max-width:900px; margin:24px auto; }
+    .card { background:#0f1724; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.5); }
+    #log { height:420px; overflow:auto; background:#07111a; padding:10px; border-radius:6px; }
+    .item { padding:8px; border-bottom:1px solid rgba(255,255,255,0.03); }
+    .ts { color:#8fb2d9; font-size:12px }
+    .loc { font-weight:700 }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <h2>WebSocket Live Predictions</h2>
+      <p>Open this page while <code>uvicorn app:app --reload</code> and the real-time streamer are running to see live messages.</p>
+      <div id="status">Connecting...</div>
+      <div id="log"></div>
+    </div>
+  </div>
+
+<script>
+  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host.replace(/:\d+$/, ':8000') + '/ws';
+  const status = document.getElementById('status');
+  const log = document.getElementById('log');
+
+  let ws;
+  function connect() {
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch (e) {
+      status.textContent = 'WebSocket not supported or invalid URL: ' + e;
+      return;
+    }
+
+    ws.onopen = () => { status.textContent = 'Connected'; }
+    ws.onclose = (ev) => {
+      // ev.code === 1006 commonly indicates the server refused the WebSocket upgrade
+      try {
+        const code = ev && ev.code;
+        if (code === 1006) {
+          status.textContent = 'WebSockets unavailable (server may not support WebSocket upgrades).';
+          // do not aggressively retry when upgrades are unsupported
+          return;
+        }
+      } catch (e) {
+        // ignore and fall back to retry behavior
+      }
+      status.textContent = 'Disconnected - retrying in 2s';
+      setTimeout(connect, 2000);
+    }
+    ws.onerror = (ev) => { status.textContent = 'WebSocket error — check server supports WebSocket upgrades.'; }
+
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data);
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.innerHTML = `<div class="ts">${data.ts || new Date().toISOString()}</div>` +
+                       `<div><span class="loc">${data.location || 'unknown'}</span> — predicted_flow: <b>${data.predicted_flow}</b>, uncertainty: ${data.uncertainty.toFixed(4)}, confidence: ${data.confidence}</div>`;
+        log.prepend(el);
+      } catch (e) {
+        const el = document.createElement('div'); el.className='item'; el.textContent = ev.data; log.prepend(el);
+      }
+    }
+  }
+
+  // Try WebSocket first; if it reports upgrades unavailable, fall back to SSE
+  let triedSSE = false;
+  function startSSE() {
+    if (triedSSE) return;
+    triedSSE = true;
+    try {
+      const sseUrl = '/sse';
+      const es = new EventSource(sseUrl);
+      status.textContent = 'Connected (SSE)';
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          const el = document.createElement('div');
+          el.className = 'item';
+          el.innerHTML = `<div class="ts">${data.ts || new Date().toISOString()}</div>` +
+                         `<div><span class="loc">${data.location || 'unknown'}</span> — predicted_flow: <b>${data.predicted_flow}</b>, uncertainty: ${data.uncertainty.toFixed(4)}, confidence: ${data.confidence}</div>`;
+          log.prepend(el);
+        } catch (e) {
+          const el = document.createElement('div'); el.className='item'; el.textContent = ev.data; log.prepend(el);
+        }
+      };
+      es.onerror = (ev) => { status.textContent = 'SSE connection error'; es.close(); }
+    } catch (e) {
+      status.textContent = 'No SSE support in this browser.';
+    }
+  }
+
+  connect();
+
+  // If websockets unavailable, the close handler sets the status and returns without retrying.
+  // Observe the status and start SSE as a fallback after a short delay.
+  const fallbackWatcher = setInterval(() => {
+    if (status.textContent && status.textContent.toLowerCase().includes('websockets unavailable')) {
+      clearInterval(fallbackWatcher);
+      startSSE();
+    }
+  }, 500);
+</script>
+</body>
+</html>
