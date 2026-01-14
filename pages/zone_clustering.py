@@ -90,7 +90,7 @@ if use_db:
             # try to fallback to cube CSV + coords if available
             try:
                 import os, json
-                csvp = "cube_layout/cube_city_traffic.csv"
+                csvp = "cube_layout/campus_city_traffic.csv"
                 coordsp = "cube_layout/location_coords.json"
                 if os.path.exists(csvp):
                     df_rt = pd.read_csv(csvp)

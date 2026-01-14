@@ -4,7 +4,7 @@ import requests
 from collections import defaultdict, deque
 
 API_URL = "http://127.0.0.1:8000/predict"
-CSV_PATH = "cube_layout/cube_city_traffic.csv"
+CSV_PATH = "cube_layout/campus_city_traffic.csv"
 
 # how many timesteps the model expects
 TIME_STEPS = 12

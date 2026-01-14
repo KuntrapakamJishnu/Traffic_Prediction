@@ -1,0 +1,26 @@
+<configuration>
+
+  <!-- ================= INPUT ================= -->
+  <input>
+    <net-file value="iit_ism_tls.net.xml"/>
+    <route-files value="iit_ism.rou.xml"/>
+    <additional-files value="vehicleTypes.add.xml"/>
+  </input>
+
+  <!-- ================= TIME ================= -->
+  <time>
+    <begin value="0"/>
+    <end value="3600"/>
+  </time>
+
+  <!-- ================= VEHICLE BEHAVIOR ================= -->
+  <processing>
+    <lanechange.duration value="1.0"/>
+  </processing>
+
+  <!-- ================= EXPORT FOR UNITY ================= -->
+  <output>
+    <fcd-output value="traffic.xml"/>
+  </output>
+
+</configuration>

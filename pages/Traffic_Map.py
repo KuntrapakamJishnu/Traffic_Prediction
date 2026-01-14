@@ -107,7 +107,7 @@ def load_location_data():
 
         # Next prefer cube CSV + coords mapping if present
         coords_path = Path("cube_layout") / "location_coords.json"
-        csv_path = Path("cube_layout") / "cube_city_traffic.csv"
+        csv_path = Path("cube_layout") / "campus_city_traffic.csv"
         if csv_path.exists():
             import json
             coords = {}

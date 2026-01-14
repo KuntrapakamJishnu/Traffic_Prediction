@@ -1,0 +1,39 @@
+<additional>
+
+    <!-- Cars -->
+    <vType id="car"
+           accel="2.6"
+           decel="4.5"
+           emergencyDecel="9.0"
+           maxSpeed="16.7"
+           length="5"
+           minGap="2.5"
+           sigma="0.5"
+           lcStrategic="1"
+           lcCooperative="0.5"
+           lcSpeedGain="1"
+           probability="0.65"/>
+
+    <!-- Bikes -->
+    <vType id="bike"
+           accel="3.5"
+           decel="4.0"
+           emergencyDecel="9.0"
+           maxSpeed="14.0"
+           length="2"
+           minGap="1.0"
+           sigma="0.7"
+           probability="0.25"/>
+
+    <!-- Buses -->
+    <vType id="bus"
+           accel="1.2"
+           decel="4.0"
+           emergencyDecel="7.0"
+           maxSpeed="13.0"
+           length="12"
+           minGap="3.0"
+           sigma="0.3"
+           probability="0.10"/>
+
+</additional>
