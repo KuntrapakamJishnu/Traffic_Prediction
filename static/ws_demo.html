@@ -1,111 +1,175 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WS Demo - Traffic Predictions</title>
-  <style>
-    body { font-family: Arial, sans-serif; background:#0b1220; color:#e6eef6; }
-    .container { max-width:900px; margin:24px auto; }
-    .card { background:#0f1724; padding:16px; border-radius:8px; box-shadow:0 6px 18px rgba(0,0,0,0.5); }
-    #log { height:420px; overflow:auto; background:#07111a; padding:10px; border-radius:6px; }
-    .item { padding:8px; border-bottom:1px solid rgba(255,255,255,0.03); }
-    .ts { color:#8fb2d9; font-size:12px }
-    .loc { font-weight:700 }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Live Feed</title>
+    <style>
+        :root {
+            --bg: #0b1220;
+            --card: #0f1724;
+            --text: #e6eef6;
+            --accent: #38bdf8;
+            --success: #4ade80;
+            --error: #f87171;
+        }
+
+        body { 
+            font-family: 'Inter', -apple-system, sans-serif; 
+            background: var(--bg); 
+            color: var(--text); 
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .container { 
+            width: 100%;
+            max-width: 800px; 
+        }
+
+        .card { 
+            background: var(--card); 
+            padding: 24px; 
+            border-radius: 12px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h2 { margin: 0; font-size: 1.5rem; }
+
+        #status { 
+            font-size: 0.85rem; 
+            padding: 4px 12px; 
+            border-radius: 20px; 
+            background: rgba(0,0,0,0.2);
+            font-weight: 600;
+        }
+
+        .status-online { color: var(--success); border: 1px solid var(--success); }
+        .status-offline { color: var(--error); border: 1px solid var(--error); }
+
+        #log { 
+            height: 500px; 
+            overflow-y: auto; 
+            background: #07111a; 
+            padding: 10px; 
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .item { 
+            padding: 12px; 
+            border-bottom: 1px solid rgba(255,255,255,0.05); 
+            animation: slideIn 0.2s ease-out;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-10px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .ts { color: #8fb2d9; font-size: 12px; margin-bottom: 4px; }
+        .loc { font-weight: 700; color: var(--accent); }
+        b { color: #fff; }
+
+        /* Custom Scrollbar */
+        #log::-webkit-scrollbar { width: 6px; }
+        #log::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+    </style>
 </head>
 <body>
-  <div class="container">
+
+<div class="container">
     <div class="card">
-      <h2>WebSocket Live Predictions</h2>
-      <p>Open this page while <code>uvicorn app:app --reload</code> and the real-time streamer are running to see live messages.</p>
-      <div id="status">Connecting...</div>
-      <div id="log"></div>
+        <header>
+            <h2>Live Predictions</h2>
+            <div id="status" class="status-offline">DISCONNECTED</div>
+        </header>
+        
+        <div id="log"></div>
     </div>
-  </div>
+</div>
 
 <script>
-  const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host.replace(/:\d+$/, ':8000') + '/ws';
-  const status = document.getElementById('status');
-  const log = document.getElementById('log');
+    const log = document.getElementById('log');
+    const status = document.getElementById('status');
+    
+    // Config: Change this if your server is on a different port/IP
+    const WS_ENDPOINT = "ws://127.0.0.1:8000/ws";
+    let socket = null;
 
-  let ws;
-  function connect() {
-    try {
-      ws = new WebSocket(wsUrl);
-    } catch (e) {
-      status.textContent = 'WebSocket not supported or invalid URL: ' + e;
-      return;
+    function connect() {
+        socket = new WebSocket(WS_ENDPOINT);
+
+        socket.onopen = () => {
+            console.log("Connected to Stream");
+            status.textContent = "● LIVE";
+            status.className = "status-online";
+        };
+
+        socket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                addEntryToLog(data);
+            } catch (err) {
+                console.error("Data error:", err);
+            }
+        };
+
+        socket.onclose = () => {
+            status.textContent = "○ RECONNECTING...";
+            status.className = "status-offline";
+            // Try to reconnect every 3 seconds
+            setTimeout(connect, 3000);
+        };
+
+        socket.onerror = (err) => {
+            console.error("Socket Error:", err);
+            socket.close();
+        };
     }
 
-    ws.onopen = () => { status.textContent = 'Connected'; }
-    ws.onclose = (ev) => {
-      // ev.code === 1006 commonly indicates the server refused the WebSocket upgrade
-      try {
-        const code = ev && ev.code;
-        if (code === 1006) {
-          status.textContent = 'WebSockets unavailable (server may not support WebSocket upgrades).';
-          // do not aggressively retry when upgrades are unsupported
-          return;
+    function addEntryToLog(data) {
+        const div = document.createElement('div');
+        div.className = 'item';
+        
+        // Human-friendly fallback if keys are missing
+        const time = data.ts || new Date().toLocaleTimeString();
+        const location = data.location || "Unknown Station";
+        const flow = data.predicted_flow ?? "N/A";
+        const confidence = data.confidence ?? "N/A";
+
+        div.innerHTML = `
+            <div class="ts">${time}</div>
+            <div>
+                <span class="loc">${location}</span> — 
+                Flow: <b>${flow}</b> | Conf: <b>${confidence}</b>
+            </div>
+        `;
+
+        // Add to top of the list
+        log.prepend(div);
+
+        // Auto-cleanup: remove oldest items if list exceeds 50
+        if (log.children.length > 50) {
+            log.removeChild(log.lastChild);
         }
-      } catch (e) {
-        // ignore and fall back to retry behavior
-      }
-      status.textContent = 'Disconnected - retrying in 2s';
-      setTimeout(connect, 2000);
     }
-    ws.onerror = (ev) => { status.textContent = 'WebSocket error — check server supports WebSocket upgrades.'; }
 
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        const el = document.createElement('div');
-        el.className = 'item';
-        el.innerHTML = `<div class="ts">${data.ts || new Date().toISOString()}</div>` +
-                       `<div><span class="loc">${data.location || 'unknown'}</span> — predicted_flow: <b>${data.predicted_flow}</b>, uncertainty: ${data.uncertainty.toFixed(4)}, confidence: ${data.confidence}</div>`;
-        log.prepend(el);
-      } catch (e) {
-        const el = document.createElement('div'); el.className='item'; el.textContent = ev.data; log.prepend(el);
-      }
-    }
-  }
-
-  // Try WebSocket first; if it reports upgrades unavailable, fall back to SSE
-  let triedSSE = false;
-  function startSSE() {
-    if (triedSSE) return;
-    triedSSE = true;
-    try {
-      const sseUrl = '/sse';
-      const es = new EventSource(sseUrl);
-      status.textContent = 'Connected (SSE)';
-      es.onmessage = (ev) => {
-        try {
-          const data = JSON.parse(ev.data);
-          const el = document.createElement('div');
-          el.className = 'item';
-          el.innerHTML = `<div class="ts">${data.ts || new Date().toISOString()}</div>` +
-                         `<div><span class="loc">${data.location || 'unknown'}</span> — predicted_flow: <b>${data.predicted_flow}</b>, uncertainty: ${data.uncertainty.toFixed(4)}, confidence: ${data.confidence}</div>`;
-          log.prepend(el);
-        } catch (e) {
-          const el = document.createElement('div'); el.className='item'; el.textContent = ev.data; log.prepend(el);
-        }
-      };
-      es.onerror = (ev) => { status.textContent = 'SSE connection error'; es.close(); }
-    } catch (e) {
-      status.textContent = 'No SSE support in this browser.';
-    }
-  }
-
-  connect();
-
-  // If websockets unavailable, the close handler sets the status and returns without retrying.
-  // Observe the status and start SSE as a fallback after a short delay.
-  const fallbackWatcher = setInterval(() => {
-    if (status.textContent && status.textContent.toLowerCase().includes('websockets unavailable')) {
-      clearInterval(fallbackWatcher);
-      startSSE();
-    }
-  }, 500);
+    // Start connection on page load
+    connect();
 </script>
+
 </body>
 </html>

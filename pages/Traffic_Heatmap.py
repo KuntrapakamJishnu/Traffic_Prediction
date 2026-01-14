@@ -13,7 +13,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🚦 Traffic Heatmap Dashboard")
+st.title("Traffic Heatmap Dashboard")
 
 # ==================================================
 # FIXED LOCATIONS
@@ -82,20 +82,20 @@ if "traffic_map" not in st.session_state:
 # ==================================================
 # RENDER MAP (NO RERUN, NO BLINK)
 # ==================================================
-st.subheader("🗺 Traffic Density Heatmap")
+st.subheader(" Traffic Density Heatmap")
 
 st_folium(
     st.session_state.traffic_map,
     height=520,
     width=1200,
-    returned_objects=[],   # 🔥 MOST IMPORTANT LINE
+    returned_objects=[],   #  MOST IMPORTANT LINE
 )
 
 # ==================================================
 # DATA TABLE
 # ==================================================
 st.markdown("---")
-st.subheader("📊 Traffic Data")
+st.subheader(" Traffic Data")
 
 st.dataframe(
     st.session_state.traffic_df.sort_values("traffic_flow", ascending=False),

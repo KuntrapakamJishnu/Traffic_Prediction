@@ -190,7 +190,7 @@ def load_location_data():
 # ==============================
 # STREAMLIT UI
 # ==============================
-st.title("🗺️ Traffic Congestion Map")
+st.title("Traffic Congestion Map")
 
 df = load_location_data()
 

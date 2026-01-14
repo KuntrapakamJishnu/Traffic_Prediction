@@ -40,9 +40,8 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
             # create timestamp: interpret time_window as hour index and set to yesterday
             try:
                 today = pd.Timestamp.now().normalize()
-                yesterday = today - pd.Timedelta(days=1)
                 df_agg["time_window"] = pd.to_numeric(df_agg.get("time_window", 0), errors="coerce").fillna(0).astype(int)
-                df_agg["timestamp"] = df_agg["time_window"].apply(lambda h: yesterday + pd.Timedelta(hours=int(h)))
+                df_agg["timestamp"] = df_agg["time_window"].apply(lambda h: today + pd.Timedelta(hours=int(h)))
             except Exception:
                 df_agg["timestamp"] = pd.Timestamp.now().normalize()
 
@@ -141,6 +140,7 @@ else:
 
     st.subheader("Traffic Flow Over Time")
     if "predicted_flow" in df.columns and "timestamp" in df.columns:
+        df=df.sort_values("timestamp")
         st.line_chart(df.set_index("timestamp")["predicted_flow"])
     else:
         st.info("No predicted_flow data available to plot.")

@@ -193,7 +193,7 @@ def log_prediction(predicted_flow, uncertainty, confidence, location):
     # Also print a short summary for server logs and broadcast to websocket clients
     try:
         summary = {
-            "ts": datetime.utcnow().isoformat() + "Z",
+            "ts": datetime.now().isoformat() + "Z",
             "location": location,
             "predicted_flow": float(predicted_flow),
             "uncertainty": float(uncertainty),
