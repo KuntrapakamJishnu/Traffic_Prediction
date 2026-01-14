@@ -1,190 +1,132 @@
 import streamlit as st
-import requests
 import pandas as pd
 import numpy as np
-from requests.exceptions import ConnectionError, Timeout
+import json
+import joblib
+import tensorflow as tf
+from datetime import datetime
 
-# =========================
+# -------------------------------
 # PAGE CONFIG
-# =========================
+# -------------------------------
 st.set_page_config(
-    page_title="Traffic Intelligence Platform",
+    page_title="Traffic Prediction Dashboard",
     layout="wide"
 )
 
-# If your backend is on a different port or machine, update this URL
-API_URL = "http://127.0.0.1:8000/predict"
+st.title("🚦 AI-Based Traffic Prediction Dashboard")
+st.caption("Streamlit-only deployment | Model-driven inference")
 
-# =========================
-# HEADER
-# =========================
-st.markdown(
-    """
-<div style="background:linear-gradient(90deg,#1e293b, #0f172a);padding:18px;border-radius:10px;margin-bottom:12px;">
-  <h1 style="color:#ffffff;text-align:center;margin:0;">Traffic Prediction Platform</h1>
-  <p style="color:rgba(255,255,255,0.9);text-align:center;margin:4px 0 0 0;">
-    Understanding urban traffic with real-time prediction and actionable recommendations
-  </p>
-</div>
-""",
-    unsafe_allow_html=True,
+# -------------------------------
+# LOAD MODEL (CACHED)
+# -------------------------------
+@st.cache_resource
+def load_model_and_scaler():
+    model = tf.keras.models.load_model("model/gru_lstm_model.h5")
+    scaler = joblib.load("model/scaler.pkl")
+    return model, scaler
+
+model, scaler = load_model_and_scaler()
+
+# -------------------------------
+# LOAD DATA FILES
+# -------------------------------
+@st.cache_data
+def load_data():
+    traffic_df = pd.read_csv("campus_traffic.csv")
+    with open("location_coords.json", "r") as f:
+        location_coords = json.load(f)
+    return traffic_df, location_coords
+
+traffic_df, location_coords = load_data()
+
+# -------------------------------
+# SIDEBAR CONTROLS
+# -------------------------------
+st.sidebar.header("⚙️ Prediction Controls")
+
+location_id = st.sidebar.selectbox(
+    "Select Road / Location ID",
+    sorted(traffic_df["location"].unique())
 )
 
-# =========================
-# BACKEND HEALTH CHECK
-# =========================
-backend_online = False
-try:
-    # Quick ping to see if server is even alive
-    requests.get("http://127.0.0.1:8000/", timeout=1)
-    backend_online = True
-except:
-    st.sidebar.error(" Backend API Offline (Port 8000)")
+hour = st.sidebar.slider("Hour of Day", 0, 23, 12)
+day_of_week = st.sidebar.slider("Day of Week (0=Mon)", 0, 6, 2)
 
-# =========================
-# SIDEBAR – LOCATION
-# =========================
-st.sidebar.header(" Location")
+# -------------------------------
+# FEATURE PREPARATION
+# -------------------------------
+def prepare_features(location, hour, day):
+    """
+    Modify this feature vector if your model
+    expects a different input format.
+    """
+    base_flow = traffic_df[traffic_df["location"] == location]["flow"].mean()
+    base_flow = 0 if np.isnan(base_flow) else base_flow
 
-location_value = None
-try:
-    df_locations = pd.read_csv("aggregated_traffic_all_new_ok.csv")
-    loc_options = sorted(df_locations["location_name"].dropna().unique().tolist())
-    location_value = st.sidebar.selectbox("Select Location", options=loc_options)
-except Exception:
-    location_value = st.sidebar.selectbox(
-        "Select Location",
-        options=[f"Location {i}" for i in range(1, 11)]
+    return [base_flow, hour, day]
+
+# -------------------------------
+# PREDICTION FUNCTION
+# -------------------------------
+def predict_traffic(features):
+    features_scaled = scaler.transform([features])
+    features_scaled = np.expand_dims(features_scaled, axis=2)
+    prediction = model.predict(features_scaled, verbose=0)
+    return float(prediction[0][0])
+
+# -------------------------------
+# MAIN DASHBOARD
+# -------------------------------
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.subheader("📊 Location Details")
+
+    st.write(f"**Location ID:** `{location_id}`")
+
+    if location_id in location_coords:
+        st.json(location_coords[location_id])
+    else:
+        st.warning("Coordinates not available for this location")
+
+with col2:
+    st.subheader("🔮 Traffic Prediction")
+
+    features = prepare_features(location_id, hour, day_of_week)
+    predicted_flow = predict_traffic(features)
+
+    st.metric(
+        label="Predicted Traffic Flow",
+        value=f"{predicted_flow:.2f}"
     )
 
-# =========================
-# INPUT FEATURES
-# =========================
-st.sidebar.markdown("###  Normalized Traffic Inputs")
-flow = st.sidebar.slider("Flow Level", 0.0, 1.0, 0.3)
-occupancy = st.sidebar.slider("Occupancy Level", 0.0, 1.0, 0.05)
-speed = st.sidebar.slider("Speed Level", 0.0, 1.0, 0.6)
-
-# Create sequence for GRU/LSTM (12 time steps)
-sequence = [[flow, occupancy, speed] for _ in range(12)]
-
-run_prediction = st.sidebar.button(" Run Live Prediction")
-
-# =========================
-# LIVE PREDICTION LOGIC
-# =========================
-if run_prediction:
-    st.subheader("Live Model Inference")
-    
-    payload = {
-        "sequence": sequence,
-        "location": str(location_value)
-    }
-
-    result = None
-    used_backend = False
-
-    try:
-        # INCREASED TIMEOUT to 15 seconds to handle heavy model processing
-        with st.spinner('Contacting Model Server...'):
-            response = requests.post(API_URL, json=payload, timeout=15)
-            response.raise_for_status()
-            result = response.json()
-            used_backend = True
-            st.success("Real-time prediction received.")
-
-    except (ConnectionError, Timeout) as e:
-        st.warning("Prediction service unreachable (Timeout/Connection) — using demo inference.")
-        st.caption(f"**Debug Info:** {e}")
-    except Exception as e:
-        st.error(f"An unexpected error occurred: {e}")
-
-    # Fallback to Demo Data if Backend Fails
-    if not used_backend:
-        mean_flow = np.mean([s[0] for s in sequence])
-        predicted_flow_demo = mean_flow * 500
-        uncertainty_demo = max(0.01, 0.05 + 0.1 * np.std([s[0] for s in sequence]))
-        
-        result = {
-            "predicted_flow": predicted_flow_demo,
-            "uncertainty": uncertainty_demo,
-            "confidence": "HIGH" if uncertainty_demo < 0.07 else "MEDIUM"
-        }
-
-    # Display results
-    predicted_flow = float(result.get("predicted_flow", 0))
-    uncertainty = float(result.get("uncertainty", 0))
-    confidence = result.get("confidence", "N/A")
-
-    # =========================
-    # KPI SECTION
-    # =========================
-    st.subheader("Prediction Summary")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Predicted Traffic Flow", f"{predicted_flow:.1f}")
-    c2.metric("Model Uncertainty", f"{uncertainty:.4f}")
-
-    if confidence == "HIGH":
-        c3.success(" HIGH CONFIDENCE")
-    elif confidence == "MEDIUM":
-        c3.warning(" MEDIUM CONFIDENCE")
-    else:
-        c3.error(" LOW CONFIDENCE")
-
-    st.markdown("---")
-
-    # =========================
-    # INTERPRETATION
-    # =========================
-    st.subheader(" Traffic Condition Interpretation")
-    if predicted_flow > 400:
-        st.error(f"Severe congestion predicted at **{location_value}**")
-        st.info("**Action:** Deploy traffic wardens and reroute vehicles via secondary arteries.")
-    elif predicted_flow > 250:
-        st.warning(f"Moderate congestion predicted at **{location_value}**")
-        st.info("**Action:** Adjust signal timings to favor high-flow directions.")
-    else:
-        st.success(f"Traffic normal at **{location_value}**")
-        st.info("**Action:** No immediate intervention required.")
-
-    # =========================
-    # INPUT EVOLUTION
-    # =========================
-    st.subheader(" Input Feature Evolution (Last 12 Steps)")
-    df_input = pd.DataFrame(sequence, columns=["Flow", "Occupancy", "Speed"])
-    st.line_chart(df_input)
-
-# =========================
-# NETWORK-LEVEL ANALYTICS
-# =========================
-# =========================
-# NETWORK-LEVEL ANALYTICS
-# =========================
-st.markdown("---")
-# Use a clear heading for the entire section
-st.header(" Network-Level Traffic Overview")
-
-try:
-    # Attempt to load the dataset
-    df_agg = pd.read_csv("aggregated_traffic_all_new_ok.csv")
-    
-    # Process data for the bar chart
-    location_data = (
-        df_agg.groupby("location_name")["avg_flow"]
-        .mean()
-        .reset_index()
-        .rename(columns={"location_name": "Location", "avg_flow": "Average Flow"})
-        .sort_values("Average Flow", ascending=False)
+    traffic_level = (
+        "LOW" if predicted_flow < 30 else
+        "MODERATE" if predicted_flow < 70 else
+        "HIGH"
     )
 
-    # Display the table first for reference
-    st.dataframe(location_data, use_container_width=True)
+    st.write(f"**Traffic Level:** `{traffic_level}`")
 
-    # ADD TITLE HERE: This places the title directly above your bar graph
-    st.subheader("Traffic Flow Review by Location")
-    st.bar_chart(location_data.set_index("Location"))
+# -------------------------------
+# HISTORICAL DATA VIEW
+# -------------------------------
+st.divider()
+st.subheader("📈 Historical Traffic Snapshot")
 
-except Exception as e:
-    # Fallback if the CSV is missing or columns don't match
-    st.info("Upload 'aggregated_traffic_all_new_ok.csv' to view the automated traffic overview.")
-    # st.write(f"Error details: {e}") # Uncomment for debugging
+filtered_df = traffic_df[traffic_df["location"] == location_id]
+
+st.dataframe(
+    filtered_df.tail(20),
+    use_container_width=True
+)
+
+# -------------------------------
+# FOOTER
+# -------------------------------
+st.divider()
+st.caption(
+    f"Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
+    "Deployed on Streamlit Cloud"
+)
