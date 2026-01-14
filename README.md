@@ -1,170 +1,309 @@
-🚦 Traffic Prediction Platform
+# 🚦 Traffic Prediction Platform
 
-An industry-grade, research-ready, end-to-end AI Traffic Prediction & Analytics System.
-Performs short-term traffic flow forecasting using a hybrid GRU–LSTM model with uncertainty estimation, serves real-time predictions via a FastAPI backend, persists results to PostgreSQL, and exposes an interactive Streamlit dashboard for monitoring, alerts, and historical analysis.
+An **industry-grade, research-ready, end-to-end AI Traffic Prediction & Analytics System**.
 
-📖 Executive Summary
+This single-file `README.md` contains the full project description plus **all example code blocks** (backend, dashboard, training, scripts, SQL, Docker) inside fenced Markdown code blocks so you can copy-paste files directly from this document.
 
-This repository implements a robust pipeline for real-time traffic forecasting designed for deployment and academic evaluation. Key strengths:
+---
 
-Hybrid GRU + LSTM deep learning model that captures short- and long-term temporal patterns.
+## 📖 Executive Summary
 
-Monte Carlo Dropout inference for uncertainty and confidence estimation.
+Urban traffic management requires accurate, explainable, and reliable forecasts. This repo delivers a production-minded ML system that bridges research and deployment.
 
-FastAPI backend for low-latency prediction serving and scalability.
+## 🎯 Objectives
 
-PostgreSQL for reliable storage of predictions and analytics-ready history.
+* Predict short-horizon traffic flows (minutes → hours)
+* Provide per-prediction uncertainty and confidence
+* Persist predictions for analytics and alerting
+* Provide a Streamlit dashboard for stakeholders
 
-Streamlit dashboard for easy exploration, operational monitoring, and alerting.
+---
 
-Modular design enabling reproducible research and production deployment.
+## 🏗️ System Architecture
 
-🎯 Objectives
-
-Provide accurate short-horizon traffic predictions (minutes → hours).
-
-Attach uncertainty metrics to each prediction for safer decision making.
-
-Persist and analyze predictions to support historical analytics and alerts.
-
-Offer a user-friendly dashboard for stakeholders (traffic engineers, city planners).
-
-Ship a production-minded codebase: clear structure, environment setup, and deployment guidance.
-
-🏗️ System Architecture
-[Traffic Sensors / Data Sources]
-            ↓ (ingest, batch, or RT stream)
-     Data Preprocessing Layer
-            ↓ (sequences, scaling)
+```
+[ Traffic Sensors / Historical Data ]
+                ↓
+        Data Preprocessing
+                ↓
       Hybrid GRU + LSTM Model
-            ↓ (predictions + MC Dropout runs)
-       FastAPI Prediction Service
-            ↓ (persist)
-       PostgreSQL (predictions/history)
-            ↓
-      Streamlit Dashboard (UI + Alerts)
+      (MC Dropout inference)
+                ↓
+         FastAPI Backend
+                ↓
+            PostgreSQL
+                ↓
+       Streamlit Dashboard
+```
+
+---
+
+## 📂 Repository Single-file Preview (copy sections into files as needed)
+
+The sections below include ready-to-use code blocks. Each code block is intended to be saved into the filename shown in its header comment.
+
+---
+
+### `requirements.txt`
+
+```text
+fastapi==0.95.2
+uvicorn[standard]==0.21.1
+tensorflow==2.12.0
+numpy==1.25.0
+pandas==2.1.0
+scikit-learn==1.2.2
+joblib==1.3.2
+psycopg2-binary==2.9.7
+sqlalchemy==2.1.0
+streamlit==1.24.0
+python-dotenv==1.1.0
+matplotlib==3.7.2
+```
+
+---
+
+### `app.py`  (FastAPI backend)
+
+```python
+# app.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import numpy as np
+import joblib
+import os
+import datetime
+import psycopg2
+from psycopg2.extras import execute_values
+import tensorflow as tf
+
+# Config via env
+DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://traffic_user:secure_password@localhost:5432/traffic_db')
+MODEL_PATH = os.getenv('MODEL_PATH', './model/gru_lstm_model.h5')
+SCALER_PATH = os.getenv('SCALER_PATH', './model/scaler.pkl')
+MC_RUNS = int(os.getenv('MC_RUNS', '50'))
+
+# Load artifacts
+model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+scaler = joblib.load(SCALER_PATH)
+
+app = FastAPI(title="Traffic Prediction API")
+
+class PredictRequest(BaseModel):
+    location: str
+    sequence: list[float]
+    timestamp: str | None = None
+
+class PredictResponse(BaseModel):
+    predicted_flow: float
+    uncertainty: float
+    confidence: float
+    model_name: str
+    timestamp: str
 
 
-🔧 Tech Stack
-
-Language: Python 3.9+
-
-ML: TensorFlow / Keras (GRU, LSTM), NumPy, scikit-learn (scalers)
-
-Backend: FastAPI, Uvicorn
-
-Dashboard: Streamlit, Pandas
-
-DB: PostgreSQL 14+, psycopg2
-
-Utilities: joblib, SQLAlchemy (optional), Docker (recommended)
-
-📂 Project Structure
-Traffic_Prediction/
-│
-├── app.py                         # FastAPI application (prediction endpoints + DB writes)
-├── Dashboard.py                   # Streamlit app entry point (multi-page)
-├── requirements.txt               # Python dependencies
-├── README.md                      # This document
-│
-├── model/
-│   ├── gru_lstm_model.h5          # Trained model weights
-│   └── scaler.pkl                 # Preprocessing scaler (joblib)
-│
-├── pages/                         # Streamlit subpages (Live_Monitor, Alerts, History)
-│   ├── Live_Monitor.py
-│   ├── Alerts.py
-│   └── Historical_Analytics.py
-│
-├── real_time/                     # Real-time ingestion & adapters (websocket/SSE helpers)
-├── scripts/                       # Training, evaluation, preprocessing scripts
-├── static/                        # Images, CSS, assets for dashboard
-│
-├── data/
-│   ├── aggregated_traffic_all_new_ok.csv
-│   └── aggressive_traffic_alerts_new_ok.csv
-│
-└── docs/                          # Optional: diagrams, experiment logs, model cards
-
-🗄️ Database Design (Production Ready)
-
-Table: traffic_predictions
-
-Column	Type	Notes
-id	SERIAL	Primary key
-timestamp	TIMESTAMP	Prediction timestamp (UTC recommended)
-location	TEXT	Location identifier (standardized)
-predicted_flow	FLOAT	Predicted traffic flow (units consistent with input)
-uncertainty	FLOAT	Estimated standard deviation or similar uncertainty metric
-confidence	FLOAT	Derived confidence score (0–1)
-model_name	TEXT	Model version / artifact id
-created_at	TIMESTAMP	Record insert time (DEFAULT NOW())
-
-Schema (SQL):
-
-CREATE TABLE IF NOT EXISTS traffic_predictions (
-    id SERIAL PRIMARY KEY,
-    timestamp TIMESTAMP NOT NULL,
-    location TEXT NOT NULL,
-    predicted_flow DOUBLE PRECISION NOT NULL,
-    uncertainty DOUBLE PRECISION,
-    confidence DOUBLE PRECISION,
-    model_name TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+def mc_predict(model, x, runs=50):
+    # Ensure dropout is active during inference via `training=True`
+    preds = []
+    for _ in range(runs):
+        preds.append(model(x, training=True).numpy())
+    arr = np.concatenate(preds, axis=0)  # shape: (runs, batch, 1) or similar
+    mean = arr.mean(axis=0).squeeze()
+    std = arr.std(axis=0).squeeze()
+    return mean, std
 
 
-Indexing recommendations:
-
-CREATE INDEX idx_tp_timestamp ON traffic_predictions (timestamp);
-
-CREATE INDEX idx_tp_location ON traffic_predictions (location);
-For high-query loads, consider partitioning by time (daily/monthly) and using connection pooling (pgbouncer).
-
-⚙️ Environment & Setup
-1. Clone
-git clone https://github.com/<your-org>/Traffic_Prediction.git
-cd Traffic_Prediction
-
-2. Python environment
-python -m venv venv
-# Activate:
-# Windows:
-venv\Scripts\activate
-# macOS/Linux:
-source venv/bin/activate
-
-3. Install dependencies
-pip install --upgrade pip
-pip install -r requirements.txt
-
-4. Environment variables (recommended)
-
-Create a .env or pass environment variables for DB and runtime settings:
-
-DATABASE_URL=postgresql://user:password@localhost:5432/traffic_db
-MODEL_PATH=./model/gru_lstm_model.h5
-SCALER_PATH=./model/scaler.pkl
-APP_ENV=production
-LOG_LEVEL=info
-
-🐘 PostgreSQL Setup (detailed)
-
-Install PostgreSQL 14+ (OS package manager, Docker, or cloud RDS).
-
-Create DB and user:
-
-CREATE DATABASE traffic_db;
-CREATE USER traffic_user WITH PASSWORD 'secure_password';
-GRANT ALL PRIVILEGES ON DATABASE traffic_db TO traffic_user;
+def compute_confidence(uncertainty, historical_std=1.0):
+    # Simple mapping: lower uncertainty -> higher confidence
+    conf = 1.0 / (1.0 + (uncertainty / (historical_std + 1e-9)))
+    return float(np.clip(conf, 0.0, 1.0))
 
 
-Create schema/tables as above.
+def persist_prediction(conn_str, row):
+    # row: (timestamp, location, predicted_flow, uncertainty, confidence, model_name)
+    insert_sql = """
+    INSERT INTO traffic_predictions (timestamp, location, predicted_flow, uncertainty, confidence, model_name)
+    VALUES %s
+    """
+    conn = psycopg2.connect(conn_str)
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                execute_values(cur, insert_sql, [row])
+    finally:
+        conn.close()
 
-Configure connection string in .env and ensure psycopg2 present in requirements.txt.
 
-Docker Compose snippet (recommended for dev):
+@app.post('/predict', response_model=PredictResponse)
+async def predict(req: PredictRequest):
+    try:
+        seq = np.array(req.sequence, dtype=float).reshape(-1, 1)
+        # scale
+        seq_scaled = scaler.transform(seq).reshape(1, seq.shape[0], 1)
 
+        mean_scaled, std_scaled = mc_predict(model, seq_scaled, runs=MC_RUNS)
+        # If model predicts single-step, mean_scaled likely shape (1,); adapt accordingly
+        # Inverse transform if scaler is a univariate scaler
+        mean_unscaled = scaler.inverse_transform(np.array(mean_scaled).reshape(-1, 1)).squeeze()[0]
+        std_unscaled = std_scaled * (scaler.scale_[0] if hasattr(scaler, 'scale_') else 1.0)
+
+        confidence = compute_confidence(std_unscaled, historical_std=5.0)
+
+        timestamp = req.timestamp or datetime.datetime.utcnow().isoformat() + 'Z'
+        model_name = os.path.basename(MODEL_PATH)
+
+        persist_row = (timestamp, req.location, float(mean_unscaled), float(std_unscaled), confidence, model_name)
+        # Persist -- do it asynchronously / fire-and-forget in production; here we persist synchronously
+        persist_prediction(DATABASE_URL, persist_row)
+
+        return {
+            'predicted_flow': float(mean_unscaled),
+            'uncertainty': float(std_unscaled),
+            'confidence': confidence,
+            'model_name': model_name,
+            'timestamp': timestamp
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+> **Note:** This is a simple synchronous DB write for clarity. In production, use connection pooling and robust retry logic (e.g., SQLAlchemy with pool_pre_ping or pgBouncer).
+
+---
+
+### `Dashboard.py` (Streamlit)
+
+```python
+# Dashboard.py
+import streamlit as st
+import requests
+import pandas as pd
+import time
+
+API_URL = st.secrets.get('API_URL', 'http://127.0.0.1:8000')
+
+st.set_page_config(page_title='Traffic Prediction Dashboard', layout='wide')
+
+st.title('Traffic Prediction — Live Monitor')
+
+location = st.text_input('Location', value='Hirapur Road')
+
+if st.button('Run Manual Prediction'):
+    seq_str = st.text_area('Enter last N flow values as comma-separated', value='45,48,50,47,49')
+    seq = [float(x.strip()) for x in seq_str.split(',') if x.strip()]
+    payload = {'location': location, 'sequence': seq}
+    with st.spinner('Requesting prediction...'):
+        resp = requests.post(f'{API_URL}/predict', json=payload, timeout=10)
+    if resp.ok:
+        data = resp.json()
+        st.success(f"Predicted: {data['predicted_flow']:.2f} (uncertainty: {data['uncertainty']:.2f}, conf: {data['confidence']:.2f})")
+    else:
+        st.error(f'Error: {resp.text}')
+
+st.markdown('---')
+
+st.subheader('Recent Predictions (from DB)')
+
+@st.cache_data(ttl=30)
+def load_recent():
+    # For a simple demo, call a /recent endpoint or query the DB directly
+    try:
+        r = requests.get(f'{API_URL}/recent?limit=50', timeout=5)
+        if r.ok:
+            return pd.DataFrame(r.json())
+    except Exception:
+        return pd.DataFrame()
+
+df = load_recent()
+if df.empty:
+    st.info('No recent predictions available or API unreachable.')
+else:
+    st.dataframe(df)
+    st.line_chart(df.set_index('timestamp')['predicted_flow'])
+```
+
+---
+
+### `scripts/preprocess.py`
+
+```python
+# scripts/preprocess.py
+import pandas as pd
+import numpy as np
+import joblib
+from sklearn.preprocessing import StandardScaler
+
+INPUT_CSV = 'data/aggregated_traffic_all_new_ok.csv'
+OUT_SCALER = 'model/scaler.pkl'
+OUT_PROC = 'data/processed_sequences.npz'
+SEQUENCE_LENGTH = 10
+
+ df = pd.read_csv(INPUT_CSV, parse_dates=['timestamp'])
+# assume columns: timestamp, location, flow
+
+sequences = []
+for loc, g in df.groupby('location'):
+    flows = g.sort_values('timestamp')['flow'].values
+    for i in range(len(flows) - SEQUENCE_LENGTH):
+        seq = flows[i:i + SEQUENCE_LENGTH]
+        target = flows[i + SEQUENCE_LENGTH]
+        sequences.append((seq, target))
+
+X = np.stack([s for s, t in sequences])  # (N, seq_len)
+y = np.array([t for s, t in sequences])
+
+scaler = StandardScaler()
+N, L = X.shape
+X_flat = X.reshape(-1, 1)
+scaler.fit(X_flat)
+X_scaled = scaler.transform(X_flat).reshape(N, L)
+
+joblib.dump(scaler, OUT_SCALER)
+np.savez_compressed(OUT_PROC, X=X_scaled, y=y)
+print('Preprocessing completed. Saved scaler and sequences.')
+```
+
+---
+
+### `scripts/train.py` (Toy train loop)
+
+```python
+# scripts/train.py
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras import layers, models
+import joblib
+
+DATA = 'data/processed_sequences.npz'
+MODEL_OUT = 'model/gru_lstm_model.h5'
+
+arr = np.load(DATA)
+X = arr['X']  # (N, seq_len)
+y = arr['y']
+
+X = X.reshape(X.shape[0], X.shape[1], 1)
+
+inp = layers.Input(shape=(X.shape[1], 1))
+# GRU block
+x = layers.GRU(64, return_sequences=True)(inp)
+# LSTM block
+x = layers.LSTM(64)(x)
+x = layers.Dropout(0.3)(x)
+out = layers.Dense(1)(x)
+
+model = models.Model(inp, out)
+model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+
+model.fit(X, y, epochs=20, batch_size=64, validation_split=0.1)
+model.save(MODEL_OUT)
+print('Model saved to', MODEL_OUT)
+```
+
+---
+
+### `Docker Compose` (dev with Postgres)
+
+```yaml
 version: '3.8'
 services:
   db:
@@ -178,192 +317,36 @@ services:
       - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
+
 volumes:
   db_data:
+```
 
-🚀 Run the Backend (Development)
+---
 
-Start FastAPI with auto reload:
+## 🗄️ SQL Schema (copy into a migration file)
 
-uvicorn app:app --reload --host 0.0.0.0 --port 8000
+```sql
+CREATE TABLE IF NOT EXISTS traffic_predictions (
+    id SERIAL PRIMARY KEY,
+    timestamp TIMESTAMP NOT NULL,
+    location TEXT NOT NULL,
+    predicted_flow DOUBLE PRECISION NOT NULL,
+    uncertainty DOUBLE PRECISION,
+    confidence DOUBLE PRECISION,
+    model_name TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
+CREATE INDEX idx_tp_timestamp ON traffic_predictions(timestamp);
+CREATE INDEX idx_tp_location ON traffic_predictions(location);
+```
 
-Open API docs:
+---
 
-http://127.0.0.1:8000/docs
+## ✅ Quick Start
 
-
-Production note: run via Gunicorn + Uvicorn workers or containerize and use an orchestration platform; enable HTTPS and authentication.
-
-📡 Prediction API (Design & Examples)
-Endpoint: POST /predict
-
-Accepts JSON payload (sequence + metadata), returns prediction with uncertainty.
-
-Request
-
-{
-  "location": "Hirapur Road",
-  "sequence": [45, 48, 50, 47, 49],   // past N flow measurements
-  "timestamp": "2026-01-15T07:30:00Z"  // optional - ISO 8601 UTC recommended
-}
-
-
-Response
-
-{
-  "predicted_flow": 52.08,
-  "uncertainty": 1.82,
-  "confidence": 0.916,
-  "model_name": "gru_lstm_v1",
-  "timestamp": "2026-01-15T07:35:00Z"
-}
-
-
-Implementation notes:
-
-Preprocess (scale, reshape) incoming sequences using scaler.pkl.
-
-Run multiple stochastic forward passes (MC Dropout) and compute mean + stddev => predicted_flow, uncertainty.
-
-Derive confidence as a function of uncertainty and historical error statistics.
-
-Persist results into PostgreSQL with model_name and created_at.
-
-📊 Streamlit Dashboard
-
-Start:
-
-streamlit run Dashboard.py
-
-
-Pages
-
-Overview: KPI cards (current flow, avg confidence, top anomalies).
-
-Live Monitor: Real-time charting, manual prediction input.
-
-Alerts: AI-driven alerts with severity (NORMAL / MODERATE / HIGH).
-
-Historical Analytics: Query last 48 hours, compare predicted vs observed, confidence histograms.
-
-Best practices
-
-Use caching (st.cache_data) for costly DB queries.
-
-Poll backend at a reasonable interval (e.g., 10–30s) or subscribe to SSE/WebSocket for push updates.
-
-Show clear provenance: model version, data timestamp, and confidence on every chart.
-
-🚨 Alerts & Anomaly Detection
-
-Algorithm (example):
-
-Compute Z-score of recent residuals or use rolling MAD.
-
-Thresholds:
-
-|z| < 2 → NORMAL
-
-2 ≤ |z| < 3 → MODERATE
-
-|z| ≥ 3 → HIGH
-
-Integration
-
-Alert records saved to alerts table (optional).
-
-Dashboard highlights active alerts and allows acknowledgment.
-
-Optionally push critical alerts to Slack/Telegram/email via webhook.
-
-🧠 Model Details & Reproducibility
-
-Architecture: stacked GRU + LSTM layers, dropout layers for MC inference.
-
-Training pipeline: scripts in scripts/ handle preprocessing, sequence creation, model training, checkpointing, and evaluation.
-
-Preprocessing: scaler.pkl (StandardScaler/MinMax) persisted via joblib—must be used at inference.
-
-Evaluation metrics: MAE, RMSE, MAPE, and calibration metrics for uncertainty (e.g., prediction interval coverage).
-
-Experiment tracking: recommended to use MLflow or Weights & Biases (store hyperparameters, seeds, artifact versions).
-
-Training example (high level):
-
-# preprocess
-python scripts/preprocess.py --input data/aggregated_traffic.csv --out data/processed.pkl
-
-# train
-python scripts/train.py --config configs/train.yaml --output model/
-
-✅ Deployment Recommendations
-
-Containerize with Docker. Multi-stage build: install dependencies, copy model artifacts, and expose Uvicorn server.
-
-Use an application server: Gunicorn + Uvicorn workers or FastAPI with uvicorn supervised by systemd / Docker orchestrator.
-
-Scaling: Horizontal scale API servers behind a load balancer; use a managed PostgreSQL and connection pooling.
-
-Observability: Prometheus + Grafana for metrics; centralize logs (ELK / EFK).
-
-Security: Serve over HTTPS, secure DB credentials (vault / secrets manager), enable RBAC and token authentication on APIs if public.
-
-CI/CD: Automated tests, linting, model artifact validation, and automated image builds on push.
-
-🔎 Evaluation & Research Notes
-
-Report MAE, RMSE, and MAPE on held-out test sets; include confidence intervals.
-
-Include ablation studies: GRU only vs LSTM only vs hybrid; dropout rates; sequence lengths.
-
-Publish a model card (docs/) describing limitations, intended use, and data provenance.
-
-When claiming "real-time", specify latency SLOs (e.g., <200ms per request) and measure them.
-
-🛠 Troubleshooting & Tips
-
-If model fails to load: check MODEL_PATH, ensure TensorFlow version matches the model.
-
-DB connection errors: verify DATABASE_URL, confirm PostgreSQL is reachable and credentials correct.
-
-High latency: enable batching, increase workers, profile model inference (use TF-XLA or TensorRT where applicable).
-
-Reproducibility issues: fix random seeds in training (numpy, tensorflow, python random) and log them.
-
-♻️ Maintenance & Extensibility
-
-Add more sources: integrate IoT sensor streams, external APIs, or historical datasets.
-
-Model upgrades: treat model artifacts as immutable versions; store version with each prediction.
-
-Feature store: consider introducing a feature store for feature engineering reuse.
-
-Geo-aware modeling: incorporate spatial graphs (GNNs) for multi-location correlation.
-
-📁 Useful Scripts (examples)
-
-scripts/preprocess.py — data cleaning and sequence generation
-
-scripts/train.py — model training loop with checkpoints and evaluation
-
-scripts/evaluate.py — compute evaluation metrics and calibration plots
-
-scripts/deploy_docker.sh — builds and pushes container image
-
-📄 Author & Contact
-
-Jishnu K.
-AI / ML Engineer — Traffic Intelligence Systems
-(Include email or professional link in repo profile if desired)
-
-🧾 Licensing & Citations
-
-Add a LICENSE (e.g., MIT or Apache-2.0) to clarify reuse and attribution.
-
-Include references to any datasets or public APIs used; document data collection and consent if applicable.
-
-✅ Quick Start Summary (commands)
+```bash
 # clone
 git clone https://github.com/<your-org>/Traffic_Prediction.git
 cd Traffic_Prediction
@@ -373,13 +356,35 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# start DB (optional: docker-compose)
+# start DB (optional: docker-compose up -d)
 # start backend
-uvicorn app:app --reload --port 8000
+uvicorn app:app --reload --host 0.0.0.0 --port 8000
 
 # start dashboard
 streamlit run Dashboard.py
+```
 
-Final Notes (research + production mindset)
+---
 
-This repository is structured to serve two audiences: researchers who require experiment reproducibility and engineers who need a deployable, maintainable system. Keep model artifacts, dataset splits, and experiment logs under version control (artifacts registry) and enforce rigorous testing and monitoring before any production rollout.
+## 🔎 Evaluation & Research Notes
+
+* Report MAE, RMSE, MAPE on held-out test sets
+* Provide calibration metrics for MC Dropout intervals
+* Track experiments with MLflow or Weights & Biases
+
+---
+
+## 🔧 Maintenance & Extensibility
+
+* Add streaming adapters, feature store, GNN spatial model variants
+* Use model registry and immutable artifact storage
+
+---
+
+## 🧾 Licensing
+
+Add `LICENSE` (MIT or Apache-2.0) to the repository root.
+
+---
+
+*End of README.md (single-file with embedded code blocks). Save, edit, or copy the contained code blocks into corresponding files in your repo.*
