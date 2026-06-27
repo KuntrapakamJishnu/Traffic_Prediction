@@ -37,3 +37,6 @@ Thumbs.db
 
 cloudflared.exe
 ngrok.exe
+cache/
+*.jsonl
+cube_layout/*.xml
