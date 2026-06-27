@@ -105,9 +105,20 @@
     const log = document.getElementById('log');
     const status = document.getElementById('status');
     
-    // Config: Change this if your server is on a different port/IP
-    const WS_ENDPOINT = "ws://127.0.0.1:8000/ws";
+    // Use the current host when the page is served from FastAPI static files.
+    // Fall back to localhost for direct file:// preview.
+    const FALLBACK_HOST = "127.0.0.1:8000";
+    const host = window.location.host || FALLBACK_HOST;
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const httpProtocol = window.location.protocol === "https:" ? "https:" : "http:";
+    const WS_ENDPOINT = `${wsProtocol}//${host}/ws`;
+    const RECENT_ENDPOINT = `${httpProtocol}//${host}/recent?limit=25`;
     let socket = null;
+    const seen = new Set();
+
+    function entryKey(data) {
+        return [data.ts || "", data.location || "", data.predicted_flow ?? "", data.confidence ?? ""].join("|");
+    }
 
     function connect() {
         socket = new WebSocket(WS_ENDPOINT);
@@ -121,7 +132,7 @@
         socket.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                addEntryToLog(data);
+                addEntryToLog(data, true);
             } catch (err) {
                 console.error("Data error:", err);
             }
@@ -140,7 +151,13 @@
         };
     }
 
-    function addEntryToLog(data) {
+    function addEntryToLog(data, prepend = false) {
+        const key = entryKey(data);
+        if (seen.has(key)) {
+            return;
+        }
+        seen.add(key);
+
         const div = document.createElement('div');
         div.className = 'item';
         
@@ -158,8 +175,11 @@
             </div>
         `;
 
-        // Add to top of the list
-        log.prepend(div);
+        if (prepend) {
+            log.prepend(div);
+        } else {
+            log.appendChild(div);
+        }
 
         // Auto-cleanup: remove oldest items if list exceeds 50
         if (log.children.length > 50) {
@@ -167,8 +187,31 @@
         }
     }
 
+    async function refreshRecent() {
+        try {
+            const response = await fetch(RECENT_ENDPOINT, { cache: "no-store" });
+            if (!response.ok) {
+                return;
+            }
+
+            const rows = await response.json();
+            if (!Array.isArray(rows)) {
+                return;
+            }
+
+            // Show newest items first, but keep only unseen rows.
+            for (const row of rows.reverse()) {
+                addEntryToLog(row, true);
+            }
+        } catch (err) {
+            console.warn("Recent refresh failed:", err);
+        }
+    }
+
     // Start connection on page load
     connect();
+    refreshRecent();
+    setInterval(refreshRecent, 5000);
 </script>
 
 </body>

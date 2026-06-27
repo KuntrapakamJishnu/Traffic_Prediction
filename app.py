@@ -15,6 +15,8 @@ from datetime import datetime
 import asyncio
 from pathlib import Path
 
+from location_catalog import normalize_location_label
+
 
 model = tf.keras.models.load_model(
     "model/gru_lstm_model.h5",
@@ -67,6 +69,16 @@ def _read_recent_predictions(limit: int = 50) -> list[dict]:
 
     rows.sort(key=lambda row: row.get("ts", ""), reverse=True)
     return rows[:limit]
+
+
+def _normalize_recent_rows(rows: list[dict]) -> list[dict]:
+    normalized_rows = []
+    for row in rows:
+        current = dict(row)
+        if "location" in current:
+            current["location"] = normalize_location_label(current["location"])
+        normalized_rows.append(current)
+    return normalized_rows
 
 # Mount a small static folder for websocket demo
 try:
@@ -193,6 +205,7 @@ DB_CONFIG = {
 
 def log_prediction(predicted_flow, uncertainty, confidence, location):
     try:
+        location = normalize_location_label(location)
         summary = {
             "ts": datetime.now().isoformat() + "Z",
             "location": location,
@@ -283,7 +296,7 @@ def recent_predictions(limit: int = 50):
             )
             rows = cur.fetchall()
             cols = [desc[0] for desc in cur.description]
-            return [dict(zip(cols, row)) for row in rows]
+            return _normalize_recent_rows([dict(zip(cols, row)) for row in rows])
         finally:
             try:
                 cur.close()
@@ -291,7 +304,7 @@ def recent_predictions(limit: int = 50):
                 pass
             conn.close()
     except Exception:
-        return _read_recent_predictions(limit)
+        return _normalize_recent_rows(_read_recent_predictions(limit))
 
 
 

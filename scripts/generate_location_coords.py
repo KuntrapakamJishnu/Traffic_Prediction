@@ -16,8 +16,8 @@ OUT = ROOT / "cube_layout" / "location_coords.json"
 # grid size used in extract_cube_data.py (5x5)
 GRID = 5
 # base lat/lon and step (tweak as needed)
-BASE_LAT = 12.9716
-BASE_LON = 77.5946
+BASE_LAT = 16.4785
+BASE_LON = 80.5600
 STEP_LAT = 0.005
 STEP_LON = 0.005
 

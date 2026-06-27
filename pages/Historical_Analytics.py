@@ -9,6 +9,8 @@ try:
 except Exception:
     psycopg2 = None
 
+from location_catalog import AMARAVATI_LOCATION_POI, normalize_location_frame
+
 # ==============================
 # POSTGRESQL CONFIG (UPDATED)
 # ==============================
@@ -20,13 +22,32 @@ DB_CONFIG = {
     "port": 5433,
 }
 
-# Small mapping of major Dhanbad zones to lat/lon and friendly names
+# Small mapping of Amaravati and VIT-AP zones to friendly names.
 LOCATION_POI = {
-    0: {"name": "Dhanbad CBD", "lat": 23.7925, "lon": 86.4350},
-    1: {"name": "Baliapur", "lat": 23.7350, "lon": 86.3850},
-    2: {"name": "Govindpur", "lat": 23.7450, "lon": 86.4500},
-    3: {"name": "IIT-ISM", "lat": 23.8045, "lon": 86.4340},
+    0: {"name": "VIT-AP Main Gate"},
+    1: {"name": "VIT-AP Academic Block"},
+    2: {"name": "VIT-AP Hostel Zone"},
+    3: {"name": "VIT-AP Library"},
+    4: {"name": "VIT-AP Admin Block"},
+    5: {"name": "Amaravati Secretariat"},
+    6: {"name": "Inavolu Junction"},
+    7: {"name": "Tadepalli Riverfront"},
 }
+
+
+def _fill_location_names(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+    if "location" in df.columns:
+        try:
+            df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
+            df["location_name"] = df["location_id"].map(
+                lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None
+            )
+            df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
+        except Exception:
+            df["location_name"] = df["location"].astype(str)
+    return normalize_location_frame(df)
 
 def load_data(limit: int = 1000) -> pd.DataFrame:
     """Load recent prediction rows from the database."""
@@ -37,14 +58,7 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
         if response.ok:
             df = pd.DataFrame(response.json())
             if not df.empty:
-                if "location" in df.columns:
-                    try:
-                        df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
-                        df["location_name"] = df["location_id"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
-                        df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
-                    except Exception:
-                        df["location_name"] = df["location"].astype(str)
-                return df
+                        return _fill_location_names(df)
     except Exception:
         pass
 
@@ -75,15 +89,7 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
         st.warning("DB unavailable — Historical analytics will be empty unless CSV fallback is provided.")
 
     if not df.empty:
-        # Normalize DB rows for display.
-        if "location" in df.columns:
-            try:
-                df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
-                df["location_name"] = df["location_id"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
-                df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
-            except Exception:
-                df["location_name"] = df["location"].astype(str)
-        return df
+        return _fill_location_names(df)
 
     # CSV fallback for demo data if there are no DB rows yet.
     agg_path = Path("aggregated_traffic_all_new_ok.csv")
@@ -114,6 +120,7 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
 
             df_agg["confidence"] = df_agg.get("predicted_flow", 0).apply(conf)
             df_agg["location_name"] = df_agg["location_name"].astype(str)
+            df_agg = normalize_location_frame(df_agg)
             out_cols = [c for c in ["timestamp", "location_name", "predicted_flow", "uncertainty", "confidence"] if c in df_agg.columns]
             return df_agg[out_cols]
         except Exception:
@@ -137,6 +144,14 @@ else:
         df = df.dropna(subset=["timestamp"]).sort_values("timestamp")
     else:
         st.error("Data does not contain a 'timestamp' column.")
+
+    if "location_name" in df.columns and "location" in df.columns:
+        preferred = [
+            col for col in ["timestamp", "location_name", "location", "predicted_flow", "uncertainty", "confidence"]
+            if col in df.columns
+        ]
+        remaining = [col for col in df.columns if col not in preferred]
+        df = df[preferred + remaining]
 
     st.subheader("Recent Predictions")
     st.dataframe(df, width='stretch')

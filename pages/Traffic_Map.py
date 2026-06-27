@@ -35,6 +35,8 @@ import json
 import os
 from pathlib import Path
 
+from location_catalog import AMARAVATI_LOCATION_POI, AMARAVATI_MAP_CENTER, get_amaravati_coords, normalize_location_frame
+
 # Legacy sample coords (kept for backwards compatibility)
 LOCATION_COORDS = {
     1: (12.9716, 77.5946),   # Bangalore
@@ -44,12 +46,10 @@ LOCATION_COORDS = {
     5: (28.6139, 77.2090),   # Delhi
 }
 
-# Small mapping of major Dhanbad zones to lat/lon and friendly names
+# Amaravati and VIT-AP zones.
 LOCATION_POI = {
-    0: {"name": "Dhanbad CBD", "lat": 23.7925, "lon": 86.4350},
-    1: {"name": "Baliapur", "lat": 23.7350, "lon": 86.3850},
-    2: {"name": "Govindpur", "lat": 23.7450, "lon": 86.4500},
-    3: {"name": "IIT-ISM", "lat": 23.8045, "lon": 86.4340},
+    idx: {"name": name, "lat": meta["lat"], "lon": meta["lon"]}
+    for idx, (name, meta) in enumerate(AMARAVATI_LOCATION_POI.items())
 }
 
 # Try to load SUMO edge -> coords mapping created by scripts/generate_location_coords.py
@@ -86,9 +86,9 @@ def load_location_data():
 
             df = grp.merge(sample_rows[["location", "zone", "time_window", "max_flow"]], on="location", how="left")
 
-            # assign approximate coordinates centered on Dhanbad (IIT-ISM area) so map shows relevant region
-            base_lat = 23.795
-            base_lon = 86.435
+            # assign approximate coordinates centered on Amaravati / VIT-AP so map shows the right region
+            base_lat = AMARAVATI_MAP_CENTER[0]
+            base_lon = AMARAVATI_MAP_CENTER[1]
             n = len(df)
             cols = max(1, int(n**0.5))
             delta_lat = 0.002
@@ -103,7 +103,7 @@ def load_location_data():
 
             df["lat"] = lat_list
             df["lon"] = lon_list
-            return df.rename(columns={"location": "location", "avg_flow": "avg_flow"})
+            return normalize_location_frame(df.rename(columns={"location": "location", "avg_flow": "avg_flow"}))
 
         # Next prefer cube CSV + coords mapping if present
         coords_path = Path("cube_layout") / "location_coords.json"
@@ -143,30 +143,12 @@ def load_location_data():
                         pass
 
                 if not df.empty:
-                    # try to map numeric locations to friendly names and POIs
-                    try:
-                        df["location_id_num"] = pd.to_numeric(df["location"], errors="coerce")
-                        df["location_name"] = df["location_id_num"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
-                        df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
-                        # if lat/lon available in LOCATION_POI, add them
-                        lat_list = []
-                        lon_list = []
-                        for v in df["location"]:
-                            lat = None
-                            lon = None
-                            try:
-                                lid = int(v)
-                                if lid in LOCATION_POI:
-                                    lat = LOCATION_POI[lid]["lat"]
-                                    lon = LOCATION_POI[lid]["lon"]
-                            except Exception:
-                                pass
-                            lat_list.append(lat)
-                            lon_list.append(lon)
-                        df["lat"] = lat_list
-                        df["lon"] = lon_list
-                    except Exception:
-                        pass
+                    df = normalize_location_frame(df)
+                    if "location_name" not in df.columns:
+                        df["location_name"] = df["location"].astype(str)
+                    coords = df["location"].apply(get_amaravati_coords)
+                    df["lat"] = coords.apply(lambda value: value[0] if value else None)
+                    df["lon"] = coords.apply(lambda value: value[1] if value else None)
                     return df
             except Exception:
                 # DB connection failed; fall through to CSV fallback
@@ -202,10 +184,10 @@ else:
             try:
                 center = [float(df["lat"].mean()), float(df["lon"].mean())]
             except Exception:
-                center = [23.795, 86.435]
+                center = [AMARAVATI_MAP_CENTER[0], AMARAVATI_MAP_CENTER[1]]
         else:
-            # fallback to Dhanbad center
-            center = [23.795, 86.435]
+                # fallback to Amaravati center
+                center = [AMARAVATI_MAP_CENTER[0], AMARAVATI_MAP_CENTER[1]]
         # base map with light tiles
         m = folium.Map(location=center, zoom_start=12, tiles="CartoDB positron")
         marker_cluster = MarkerCluster(name="Locations").add_to(m)
@@ -239,34 +221,26 @@ else:
         if pd.isna(location) or pd.isna(avg_flow):
             continue
 
-        # resolve coordinates: prefer string-key mapping from SUMO edges, else try integer mapping
+        # resolve coordinates: prefer Amaravati/VIT-AP names, then edge-id fallback
         coords = None
-        # try string mapping (e.g., 'n00_n01')
         try:
-            if str(location) in LOCATION_COORDS_STR:
-                coords = LOCATION_COORDS_STR[str(location)]
+            coords = get_amaravati_coords(location)
         except Exception:
             coords = None
 
-        # fallback to integer mapping (legacy)
         if coords is None:
             try:
-                lid = int(location)
-                coords = LOCATION_COORDS.get(lid)
+                if str(location) in LOCATION_COORDS_STR:
+                    coords = LOCATION_COORDS_STR[str(location)]
             except Exception:
                 coords = None
 
         # If still no coords, try lat/lon columns from the DataFrame (aggregated CSV fallback)
         if coords is None:
-            # try mapping by location_name to POI lat/lon
             try:
-                # if the row contains location_name, check LOCATION_POI by name
                 name = row.get("location_name") if "location_name" in row.index else None
                 if name:
-                    for lid, info in LOCATION_POI.items():
-                        if info.get("name") == name:
-                            coords = (info.get("lat"), info.get("lon"))
-                            break
+                    coords = get_amaravati_coords(name)
             except Exception:
                 pass
 

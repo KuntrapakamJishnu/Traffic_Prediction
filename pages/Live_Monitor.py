@@ -5,6 +5,8 @@ import requests
 import numpy as np
 from requests.exceptions import RequestException
 
+from location_catalog import amaravati_heatmap_locations
+
 DEFAULT_API_URL = os.getenv("LIVE_API_URL", "http://127.0.0.1:8000/predict")
 DEFAULT_TIMEOUT = int(os.getenv("LIVE_API_TIMEOUT", "15"))
 DEFAULT_RETRIES = int(os.getenv("LIVE_API_RETRIES", "3"))
@@ -53,7 +55,8 @@ api_url = st.sidebar.text_input("Backend API URL", value=DEFAULT_API_URL)
 timeout = st.sidebar.number_input("Request timeout (s)", min_value=1, value=DEFAULT_TIMEOUT)
 retries = st.sidebar.number_input("Retry attempts", min_value=1, value=DEFAULT_RETRIES)
 
-location = st.sidebar.text_input("Location (edge name)", value="n00_n01")
+location_options = [item["location"] for item in amaravati_heatmap_locations()]
+location = st.sidebar.selectbox("Location", location_options, index=0)
 flow = st.sidebar.slider("Flow (scaled)", 0.0, 1.0, 0.3)
 occupy = st.sidebar.slider("Occupancy (scaled)", 0.0, 1.0, 0.05)
 speed = st.sidebar.slider("Speed (scaled)", 0.0, 1.0, 0.6)

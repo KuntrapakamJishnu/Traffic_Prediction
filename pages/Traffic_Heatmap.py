@@ -5,6 +5,8 @@ import folium
 from folium.plugins import HeatMap
 from streamlit_folium import st_folium
 
+from location_catalog import amaravati_heatmap_locations
+
 # ==================================================
 # PAGE CONFIG
 # ==================================================
@@ -18,12 +20,7 @@ st.title("Traffic Heatmap Dashboard")
 # ==================================================
 # FIXED LOCATIONS
 # ==================================================
-LOCATIONS = [
-    {"location": "Dhanbad CBD", "lat": 23.7925, "lon": 86.4350},
-    {"location": "Baliapur",    "lat": 23.7350, "lon": 86.3850},
-    {"location": "Govindpur",   "lat": 23.7450, "lon": 86.4500},
-    {"location": "IIT-ISM",     "lat": 23.8045, "lon": 86.4340},
-]
+LOCATIONS = amaravati_heatmap_locations()
 
 # ==================================================
 # INITIALIZE SESSION STATE (CRITICAL)

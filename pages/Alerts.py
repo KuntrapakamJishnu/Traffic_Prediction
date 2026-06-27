@@ -3,6 +3,8 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 
+from location_catalog import normalize_location_frame
+
 # Import psycopg2 lazily
 try:
     import psycopg2
@@ -21,16 +23,6 @@ DB_CONFIG = {
 }
 
 # ==============================
-# LOCATION MASTER
-# ==============================
-LOCATION_POI = {
-    0: {"name": "Dhanbad CBD"},
-    1: {"name": "Baliapur"},
-    2: {"name": "Govindpur"},
-    3: {"name": "IIT-ISM"},
-}
-
-# ==============================
 # LOAD DATA (UNCHANGED CORE)
 # ==============================
 def load_alerts():
@@ -41,6 +33,7 @@ def load_alerts():
         df["timestamp"] = pd.Timestamp.now()
         df["location_name"] = df["location_name"].astype(str)
         df["location_id"] = df["location_name"]
+        df = normalize_location_frame(df)
         return df[["timestamp", "location_id", "location_name", "predicted_flow"]]
 
     if psycopg2 is None:
@@ -63,11 +56,9 @@ def load_alerts():
     except Exception:
         return pd.DataFrame()
 
-    # Map friendly names
-    df["location_id_num"] = pd.to_numeric(df["location"], errors="coerce")
-    df["location_name"] = df["location_id_num"].map(
-        lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else "Unknown"
-    )
+    df = normalize_location_frame(df)
+    if "location_name" not in df.columns and "location" in df.columns:
+        df["location_name"] = df["location"].astype(str)
 
     return df[["timestamp", "location", "location_name", "predicted_flow"]]
 
