@@ -126,23 +126,14 @@ def load_location_data():
             try:
                 conn = psycopg2.connect(**DB_CONFIG)
                 try:
-                    # resilient query: try COALESCE first, then fallback to location_id only
+                    # resilient query: use the actual location column from the schema
                     query_try = """
-                        SELECT COALESCE(location::text, location_id::text) AS location,
+                        SELECT location::text AS location,
                                AVG(predicted_flow) AS avg_flow
                         FROM traffic_predictions
-                        GROUP BY COALESCE(location::text, location_id::text);
+                        GROUP BY location::text;
                     """
-                    query_fallback = """
-                        SELECT location_id::text AS location,
-                               AVG(predicted_flow) AS avg_flow
-                        FROM traffic_predictions
-                        GROUP BY location_id::text;
-                    """
-                    try:
-                        df = pd.read_sql(query_try, conn)
-                    except Exception:
-                        df = pd.read_sql(query_fallback, conn)
+                    df = pd.read_sql(query_try, conn)
                 except Exception:
                     df = pd.DataFrame()
                 finally:

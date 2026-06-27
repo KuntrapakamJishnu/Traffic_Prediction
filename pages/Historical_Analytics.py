@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from pathlib import Path
+import requests
 
 # Import psycopg2 lazily and handle if it's not installed
 try:
@@ -29,60 +30,29 @@ LOCATION_POI = {
 
 def load_data(limit: int = 1000) -> pd.DataFrame:
     """Load recent prediction rows from the database."""
-    # Prefer aggregated CSV (human-friendly location_name) when available
-    agg_path = Path("aggregated_traffic_all_new_ok.csv")
-    if agg_path.exists():
-        try:
-            df_agg = pd.read_csv(agg_path)
-            # Use raw rows so we preserve time_window (create timestamps for yesterday)
-            # CSV expected columns: location_name, zone, time_window, avg_flow, avg_speed, avg_occupy, max_flow
-            df_agg = df_agg.rename(columns={"avg_flow": "predicted_flow"})
-            # create timestamp: interpret time_window as hour index and set to yesterday
-            try:
-                today = pd.Timestamp.now().normalize()
-                df_agg["time_window"] = pd.to_numeric(df_agg.get("time_window", 0), errors="coerce").fillna(0).astype(int)
-                df_agg["timestamp"] = df_agg["time_window"].apply(lambda h: today + pd.Timedelta(hours=int(h)))
-            except Exception:
-                df_agg["timestamp"] = pd.Timestamp.now().normalize()
+    # Prefer the backend recent endpoint so the page reflects live predictions
+    # even when the database is unavailable.
+    try:
+        response = requests.get(f"http://127.0.0.1:8000/recent?limit={limit}", timeout=5)
+        if response.ok:
+            df = pd.DataFrame(response.json())
+            if not df.empty:
+                if "location" in df.columns:
+                    try:
+                        df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
+                        df["location_name"] = df["location_id"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
+                        df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
+                    except Exception:
+                        df["location_name"] = df["location"].astype(str)
+                return df
+    except Exception:
+        pass
 
-            # fill uncertainty with a small default (not null) and confidence heuristic
-            df_agg["uncertainty"] = df_agg.get("uncertainty", 0.0).fillna(0.0) if "uncertainty" in df_agg else 0.0
-            def conf(v):
-                try:
-                    if float(v) > 400:
-                        return "HIGH"
-                    if float(v) > 250:
-                        return "MEDIUM"
-                except Exception:
-                    pass
-                return "LOW"
-            df_agg["confidence"] = df_agg.get("predicted_flow", 0).apply(conf)
-
-            # ensure location_name exists and remove duplicate numeric 'location' column
-            df_agg["location_name"] = df_agg["location_name"].astype(str)
-            # Keep only relevant columns for historical view
-            out_cols = [c for c in ["timestamp", "location_name", "predicted_flow", "uncertainty", "confidence"] if c in df_agg.columns]
-            return df_agg[out_cols]
-        except Exception:
-            pass
-
-    # If CSV absent, try DB (resilient to schema variations)
+    # Fall back to live DB rows if the API endpoint is unavailable.
     sql_try = f"""
         SELECT
             timestamp,
-            COALESCE(location::text, location_id::text) AS location,
-            predicted_flow,
-            uncertainty,
-            confidence
-        FROM traffic_predictions
-        ORDER BY timestamp DESC
-        LIMIT {limit};
-    """
-
-    sql_fallback = f"""
-        SELECT
-            timestamp,
-            location_id::text AS location,
+            location::text AS location,
             predicted_flow,
             uncertainty,
             confidence
@@ -95,10 +65,7 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
     try:
         conn = psycopg2.connect(**DB_CONFIG)
         try:
-            try:
-                df = pd.read_sql(sql_try, conn)
-            except Exception:
-                df = pd.read_sql(sql_fallback, conn)
+            df = pd.read_sql(sql_try, conn)
         finally:
             try:
                 conn.close()
@@ -107,14 +74,50 @@ def load_data(limit: int = 1000) -> pd.DataFrame:
     except Exception:
         st.warning("DB unavailable — Historical analytics will be empty unless CSV fallback is provided.")
 
-    # Normalize name
-    if not df.empty and "location" in df.columns:
+    if not df.empty:
+        # Normalize DB rows for display.
+        if "location" in df.columns:
+            try:
+                df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
+                df["location_name"] = df["location_id"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
+                df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
+            except Exception:
+                df["location_name"] = df["location"].astype(str)
+        return df
+
+    # CSV fallback for demo data if there are no DB rows yet.
+    agg_path = Path("aggregated_traffic_all_new_ok.csv")
+    if agg_path.exists():
         try:
-            df["location_id"] = pd.to_numeric(df["location"], errors="coerce")
-            df["location_name"] = df["location_id"].map(lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else None)
-            df["location_name"] = df["location_name"].fillna(df["location"].astype(str))
+            df_agg = pd.read_csv(agg_path)
+            # Use raw rows so we preserve time_window (create timestamps from the hour index)
+            # CSV expected columns: location_name, zone, time_window, avg_flow, avg_speed, avg_occupy, max_flow
+            df_agg = df_agg.rename(columns={"avg_flow": "predicted_flow"})
+            try:
+                today = pd.Timestamp.now().normalize()
+                df_agg["time_window"] = pd.to_numeric(df_agg.get("time_window", 0), errors="coerce").fillna(0).astype(int)
+                df_agg["timestamp"] = df_agg["time_window"].apply(lambda h: today + pd.Timedelta(hours=int(h)))
+            except Exception:
+                df_agg["timestamp"] = pd.Timestamp.now().normalize()
+
+            df_agg["uncertainty"] = df_agg.get("uncertainty", 0.0).fillna(0.0) if "uncertainty" in df_agg else 0.0
+
+            def conf(v):
+                try:
+                    if float(v) > 400:
+                        return "HIGH"
+                    if float(v) > 250:
+                        return "MEDIUM"
+                except Exception:
+                    pass
+                return "LOW"
+
+            df_agg["confidence"] = df_agg.get("predicted_flow", 0).apply(conf)
+            df_agg["location_name"] = df_agg["location_name"].astype(str)
+            out_cols = [c for c in ["timestamp", "location_name", "predicted_flow", "uncertainty", "confidence"] if c in df_agg.columns]
+            return df_agg[out_cols]
         except Exception:
-            df["location_name"] = df["location"].astype(str)
+            pass
 
     return df
 

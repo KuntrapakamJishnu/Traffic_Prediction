@@ -83,7 +83,7 @@ if use_db:
     }
     try:
         conn = psycopg2.connect(**DB_CONFIG)
-        query = "SELECT lat, lon FROM traffic_predictions WHERE lat IS NOT NULL AND lon IS NOT NULL LIMIT 1000;"
+        query = "SELECT location, predicted_flow, timestamp FROM traffic_predictions ORDER BY timestamp DESC LIMIT 1000;"
         df = pd.read_sql(query, conn)
         conn.close()
         if df.empty:
@@ -120,6 +120,25 @@ if use_db:
             except Exception:
                 st.warning("Database returned no coordinate rows — falling back to sample data for preview.")
                 use_db = False
+        else:
+            coords = {}
+            coordsp = "cube_layout/location_coords.json"
+            if os.path.exists(coordsp):
+                with open(coordsp, 'r', encoding='utf-8') as fh:
+                    coords = json.load(fh)
+
+            lat_col = []
+            lon_col = []
+            for loc in df["location"]:
+                if str(loc) in coords:
+                    lat_col.append(coords[str(loc)][0])
+                    lon_col.append(coords[str(loc)][1])
+                else:
+                    lat_col.append(None)
+                    lon_col.append(None)
+
+            df = df.assign(lat=lat_col, lon=lon_col)[["lat", "lon"]].dropna()
+            use_db = not df.empty
     except Exception as e:
         st.warning(f"Failed to load DB data: {e}. Falling back to sample data.")
         use_db = False

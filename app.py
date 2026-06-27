@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 import json
 from datetime import datetime
 import asyncio
+from pathlib import Path
 
 
 model = tf.keras.models.load_model(
@@ -20,11 +21,52 @@ model = tf.keras.models.load_model(
     compile=False
 )
 scaler = joblib.load("model/scaler.pkl")
+CACHE_DIR = Path("cache")
+RECENT_PREDICTIONS_PATH = CACHE_DIR / "recent_predictions.jsonl"
 
 # ==============================
 # FASTAPI INITIALIZATION
 # ==============================
 app = FastAPI(title="Traffic Intelligence API")
+
+
+@app.get("/")
+def root_health():
+    return {"status": "ok", "service": "Traffic Intelligence API"}
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
+def _append_recent_prediction(summary: dict) -> None:
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with RECENT_PREDICTIONS_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(summary) + "\n")
+    except Exception:
+        pass
+
+
+def _read_recent_predictions(limit: int = 50) -> list[dict]:
+    rows: list[dict] = []
+    try:
+        if RECENT_PREDICTIONS_PATH.exists():
+            with RECENT_PREDICTIONS_PATH.open("r", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        continue
+    except Exception:
+        return []
+
+    rows.sort(key=lambda row: row.get("ts", ""), reverse=True)
+    return rows[:limit]
 
 # Mount a small static folder for websocket demo
 try:
@@ -150,47 +192,6 @@ DB_CONFIG = {
 }
 
 def log_prediction(predicted_flow, uncertainty, confidence, location):
-    conn = psycopg2.connect(**DB_CONFIG)
-    cur = conn.cursor()
-
-    # detect which column exists in the table and insert accordingly
-    cur.execute(
-        """
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'traffic_predictions' AND column_name IN ('location', 'location_id')
-        """
-    )
-    cols = {r[0] for r in cur.fetchall()}
-
-    if 'location' in cols:
-        cur.execute("""
-            INSERT INTO traffic_predictions
-            (predicted_flow, uncertainty, confidence, location)
-            VALUES (%s, %s, %s, %s)
-        """, (predicted_flow, uncertainty, confidence, location))
-    elif 'location_id' in cols:
-        # try to coerce textual location to integer id, else insert NULL
-        try:
-            lid = int(location)
-        except Exception:
-            lid = None
-        cur.execute("""
-            INSERT INTO traffic_predictions
-            (predicted_flow, uncertainty, confidence, location_id)
-            VALUES (%s, %s, %s, %s)
-        """, (predicted_flow, uncertainty, confidence, lid))
-    else:
-        # neither column exists; insert without location
-        cur.execute("""
-            INSERT INTO traffic_predictions
-            (predicted_flow, uncertainty, confidence)
-            VALUES (%s, %s, %s)
-        """, (predicted_flow, uncertainty, confidence))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-    # Also print a short summary for server logs and broadcast to websocket clients
     try:
         summary = {
             "ts": datetime.now().isoformat() + "Z",
@@ -199,6 +200,53 @@ def log_prediction(predicted_flow, uncertainty, confidence, location):
             "uncertainty": float(uncertainty),
             "confidence": confidence,
         }
+        _append_recent_prediction(summary)
+
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+
+            # detect which column exists in the table and insert accordingly
+            cur.execute(
+                """
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'traffic_predictions' AND column_name IN ('location', 'location_id')
+                """
+            )
+            cols = {r[0] for r in cur.fetchall()}
+
+            if 'location' in cols:
+                cur.execute("""
+                    INSERT INTO traffic_predictions
+                    (predicted_flow, uncertainty, confidence, location)
+                    VALUES (%s, %s, %s, %s)
+                """, (predicted_flow, uncertainty, confidence, location))
+            elif 'location_id' in cols:
+                # try to coerce textual location to integer id, else insert NULL
+                try:
+                    lid = int(location)
+                except Exception:
+                    lid = None
+                cur.execute("""
+                    INSERT INTO traffic_predictions
+                    (predicted_flow, uncertainty, confidence, location_id)
+                    VALUES (%s, %s, %s, %s)
+                """, (predicted_flow, uncertainty, confidence, lid))
+            else:
+                # neither column exists; insert without location
+                cur.execute("""
+                    INSERT INTO traffic_predictions
+                    (predicted_flow, uncertainty, confidence)
+                    VALUES (%s, %s, %s)
+                """, (predicted_flow, uncertainty, confidence))
+
+            conn.commit()
+            cur.close()
+            conn.close()
+        except Exception as db_error:
+            print("[PREDICTION_LOG] DB write skipped:", db_error)
+
+        # Also print a short summary for server logs and broadcast to websocket clients
         msg = json.dumps(summary)
         print("[PREDICTION_LOG]", msg)
         # enqueue for async broadcast (SSE + websocket) if loop available
@@ -215,6 +263,35 @@ def log_prediction(predicted_flow, uncertainty, confidence, location):
             pass
     except Exception:
         pass
+
+
+@app.get("/recent")
+def recent_predictions(limit: int = 50):
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT timestamp, location::text AS location,
+                       predicted_flow, uncertainty, confidence
+                FROM traffic_predictions
+                ORDER BY timestamp DESC
+                LIMIT %s
+                """,
+                (limit,)
+            )
+            rows = cur.fetchall()
+            cols = [desc[0] for desc in cur.description]
+            return [dict(zip(cols, row)) for row in rows]
+        finally:
+            try:
+                cur.close()
+            except Exception:
+                pass
+            conn.close()
+    except Exception:
+        return _read_recent_predictions(limit)
 
 
 

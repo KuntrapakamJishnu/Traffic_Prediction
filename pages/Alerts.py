@@ -49,7 +49,7 @@ def load_alerts():
     sql = """
         SELECT
             timestamp,
-            location_id,
+            location,
             predicted_flow
         FROM traffic_predictions
         ORDER BY timestamp DESC
@@ -64,12 +64,12 @@ def load_alerts():
         return pd.DataFrame()
 
     # Map friendly names
-    df["location_id_num"] = pd.to_numeric(df["location_id"], errors="coerce")
+    df["location_id_num"] = pd.to_numeric(df["location"], errors="coerce")
     df["location_name"] = df["location_id_num"].map(
         lambda x: LOCATION_POI.get(int(x), {}).get("name") if not pd.isna(x) and int(x) in LOCATION_POI else "Unknown"
     )
 
-    return df[["timestamp", "location_id", "location_name", "predicted_flow"]]
+    return df[["timestamp", "location", "location_name", "predicted_flow"]]
 
 # ==============================
 # STREAMLIT UI
